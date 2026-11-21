@@ -5,6 +5,8 @@ The browser streams directly from Jellyfin with a limited-user credential.
 The database and the service cleanup worker manage its lifetime (see tokens.py).
 """
 
+from urllib.parse import parse_qs, urlsplit
+
 from django.conf import settings
 
 from . import jellyfin
@@ -119,11 +121,45 @@ def _segments(item_id):
     return out
 
 
-def start(request, item_id, start_seconds=0, audio_index=None):
+# Player "Quality" menu -> bitrate ceiling (bits/s). None = automatic.
+QUALITIES = {"auto": None, "original": jellyfin.LAN_MAX_BITRATE, "720p": 3_000_000, "480p": 1_500_000}
+# Transcode reasons that mean the *video* is re-encoded (CPU-heavy); anything
+# else (container, audio, subtitles) is just repackaging.
+VIDEO_REASONS = ("Video", "Bitrate", "RefFrames", "Anamorphic", "Interlaced", "Level", "Profile", "Framerate")
+
+
+def max_bitrate(request, quality):
+    """Ceiling for this stream: the viewer's choice, else LAN speed at home and
+    MEDIAHUB_REMOTE_MAX_BITRATE (shared home upload) for everyone else."""
+    chosen = QUALITIES.get(quality)
+    if chosen:
+        return chosen
+    remote = media_base(request) != settings.JELLYFIN_URL
+    return settings.MEDIAHUB_REMOTE_MAX_BITRATE if remote else jellyfin.LAN_MAX_BITRATE
+
+
+def _play_method(source):
+    """'direct' (file as-is), 'remux' (repackaged, video copied) or 'transcode'."""
+    if source.get("SupportsDirectPlay"):
+        return "direct", []
+    query = parse_qs(urlsplit(source.get("TranscodingUrl") or "").query)
+    reasons = [r for r in (query.get("TranscodeReasons", [""])[0]).split(",") if r]
+    video = any(any(k in r for k in VIDEO_REASONS) for r in reasons)
+    return ("transcode" if video else "remux"), reasons
+
+
+def _source_video(streams):
+    v = next((s for s in streams if s.get("Type") == "Video"), {})
+    return {"codec": (v.get("Codec") or "").lower() or None, "bitDepth": v.get("BitDepth"), "height": v.get("Height")}
+
+
+def start(request, item_id, start_seconds=0, audio_index=None, caps=None, quality="auto"):
     session = stream_session()
     base = media_base(request)
     item = jellyfin.item(item_id)
-    info = jellyfin.playback_info(item_id, session.token, session.user_id, audio_index, device=session.device_id)
+    ceiling = max_bitrate(request, quality)
+    profile = jellyfin.browser_profile(caps, ceiling)
+    info = jellyfin.playback_info(item_id, session.token, session.user_id, audio_index, device=session.device_id, profile=profile)
     sources = info.get("MediaSources") or []
     if not sources:
         raise jellyfin.JellyfinError("No playable media source")
@@ -150,7 +186,13 @@ def start(request, item_id, start_seconds=0, audio_index=None):
     else:
         raise jellyfin.JellyfinError("Jellyfin offered no browser-playable stream")
 
+    method, reasons = _play_method(source)
     return {
+        "method": method,
+        "reasons": reasons,
+        "sourceVideo": _source_video(streams),
+        "quality": quality if quality in QUALITIES else "auto",
+        "maxBitrate": ceiling,
         "url": url,
         "type": kind,
         "startSeconds": start_seconds,

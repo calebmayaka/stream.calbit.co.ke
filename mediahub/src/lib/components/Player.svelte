@@ -9,9 +9,10 @@
 -->
 <script>
   import { onMount } from 'svelte';
-  import { ArrowLeft, LoaderCircle, Captions, Check, Play, X } from 'lucide-svelte';
-  import { startPlayback, saveProgress, stopPlayback } from '$lib/data/api.js';
+  import { ArrowLeft, LoaderCircle, SlidersHorizontal, Check, Play, X } from 'lucide-svelte';
+  import { startPlayback, saveProgress, stopPlayback, reportPlaybackStats } from '$lib/data/api.js';
   import { createAutoplay } from '$lib/playback/autoplay.js';
+  import { detectCapabilities, clientLabel } from '$lib/playback/capabilities.js';
 
   /** @type {{ itemId: string, title: string, subtitle?: string|null, startSeconds?: number, onclose: () => void, onnext?: (next: { id: string, label: string }) => void }} */
   let { itemId, title, subtitle = null, startSeconds = 0, onclose, onnext } = $props();
@@ -32,9 +33,85 @@
   let countdown = $state(COUNTDOWN);
   let autoplay = $state(null);
 
+  // Quality menu. "auto" lets the server cap remote streams to share the home
+  // upload; the choice is remembered per browser.
+  const QUALITY_KEY = 'mediahub-quality';
+  const QUALITIES = [
+    { id: 'auto', label: 'Auto' },
+    { id: 'original', label: 'Original' },
+    { id: '720p', label: '720p · 3 Mbps' },
+    { id: '480p', label: '480p · 1.5 Mbps' }
+  ];
+  const METHOD_LABEL = {
+    direct: 'Playing the original file',
+    remux: 'Original video, repackaged (no conversion)',
+    transcode: 'Converted on the server'
+  };
+  let quality = $state(readQuality());
+
+  function readQuality() {
+    try {
+      const saved = localStorage.getItem(QUALITY_KEY);
+      return QUALITIES.some((q) => q.id === saved) ? saved : 'auto';
+    } catch {
+      return 'auto';
+    }
+  }
+
   let hls = null;
   let lastReport = 0;
   let cancelled = false;
+  // Some browsers claim HEVC/AV1 support but can't decode a given file. If the
+  // original (copied) stream fails, retry once with H.264 conversion.
+  let forceH264 = false;
+
+  function fallbackToH264() {
+    if (forceH264 || !session || session.method === 'transcode') return false;
+    if (!['hevc', 'av1'].includes(session.sourceVideo?.codec)) return false;
+    forceH264 = true;
+    load(video?.currentTime || startSeconds, { audioIndex: session.audioIndex ?? null });
+    return true;
+  }
+
+  // Playback measurements, sent once when the player closes (manage.py playbackstats).
+  const stats = { loadAt: 0, startupMs: 0, started: false, stalls: 0, stallMs: 0, stallAt: 0, seeking: false, watched: 0, lastTime: 0, sent: false };
+
+  function onPlaying() {
+    const t = performance.now();
+    if (!stats.started) {
+      stats.started = true;
+      stats.startupMs = Math.round(t - stats.loadAt);
+    } else if (stats.stallAt) {
+      stats.stallMs += Math.round(t - stats.stallAt);
+    }
+    stats.stallAt = 0;
+    stats.seeking = false;
+  }
+
+  function onWaiting() {
+    // Buffering after the picture started, not caused by the viewer seeking.
+    if (stats.started && !stats.seeking && !stats.stallAt) {
+      stats.stalls += 1;
+      stats.stallAt = performance.now();
+    }
+  }
+
+  function sendStats() {
+    if (stats.sent || !session) return;
+    stats.sent = true;
+    if (stats.stallAt) stats.stallMs += Math.round(performance.now() - stats.stallAt);
+    reportPlaybackStats(itemId, {
+      method: session.method,
+      codec: session.sourceVideo?.codec ?? '',
+      quality: session.quality,
+      maxBitrate: session.maxBitrate ?? 0,
+      startupMs: Math.min(stats.startupMs, 600_000),
+      stalls: stats.stalls,
+      stallMs: Math.min(stats.stallMs, 86_400_000),
+      watchedSeconds: Math.min(Math.round(stats.watched), 86_400),
+      client: clientLabel()
+    });
+  }
 
   const total = $derived(Number.isFinite(video?.duration) && video.duration > 0 ? video.duration : (session?.duration ?? 0));
   const segment = $derived(
@@ -57,12 +134,17 @@
 
   function onTimeUpdate() {
     now = video.currentTime;
+    // Count actually-played time (small forward steps), not seeks.
+    const step = now - stats.lastTime;
+    if (!video.paused && step > 0 && step < 2) stats.watched += step;
+    stats.lastTime = now;
     if (Date.now() - lastReport > REPORT_EVERY) report();
   }
 
   function close() {
     autoplay?.destroy();
     report({ keepalive: true });
+    sendStats();
     onclose();
   }
 
@@ -87,17 +169,19 @@
     if (session?.playSessionId) stopPlayback(session.playSessionId);
   }
 
-  /** (Re)start the stream — on open, and when the audio track changes. */
-  async function load(at, audioIndex = null) {
+  /** (Re)start the stream — on open, and when the audio track or quality changes. */
+  async function load(at, { audioIndex = null, repickSubs = false } = {}) {
     loading = true;
     error = null;
+    if (!stats.started) stats.loadAt = performance.now();
     try {
-      const fresh = await startPlayback(itemId, at, audioIndex);
+      const fresh = await startPlayback(itemId, at, audioIndex, { caps: forceH264 ? {} : detectCapabilities(), quality });
       if (cancelled) return stopPlayback(fresh.playSessionId);
       teardown();
       session = fresh;
+      stats.lastTime = at;
       // New audio language -> re-pick subtitles (e.g. Japanese audio turns English subs on).
-      if (audioIndex !== null || !fresh.subtitles.some((s) => s.index === subIndex)) {
+      if (repickSubs || !fresh.subtitles.some((s) => s.index === subIndex)) {
         subIndex = fresh.subtitles.find((s) => s.default)?.index ?? null;
       }
 
@@ -107,7 +191,10 @@
         if (!Hls.isSupported()) throw new Error('This browser can’t play HLS video.');
         hls = new Hls({ startPosition: at || -1 });
         hls.on(Hls.Events.ERROR, (_e, data) => {
-          if (data.fatal) error = `Playback failed (${data.details}).`;
+          if (!data.fatal) return;
+          const decodeProblem = data.type === Hls.ErrorTypes.MEDIA_ERROR || /codec|parsing|buffer/i.test(data.details);
+          if (decodeProblem && fallbackToH264()) return;
+          error = `Playback failed (${data.details}).`;
         });
         hls.loadSource(fresh.url);
         hls.attachMedia(video);
@@ -128,7 +215,24 @@
     menuOpen = false;
     if (index === session?.audioIndex) return;
     report();
-    load(video.currentTime, index);
+    load(video.currentTime, { audioIndex: index, repickSubs: true });
+  }
+
+  function chooseQuality(id) {
+    menuOpen = false;
+    if (id === quality) return;
+    quality = id;
+    try {
+      localStorage.setItem(QUALITY_KEY, id);
+    } catch {
+      /* remembered for this session only */
+    }
+    report();
+    load(video.currentTime, { audioIndex: session?.audioIndex ?? null });
+  }
+
+  function mbps(bits) {
+    return bits >= 1_000_000 ? `${Math.round(bits / 1_000_000)} Mbps` : `${Math.round(bits / 1000)} kbps`;
   }
 
   // Show exactly the chosen subtitle track (tracks render in session.subtitles order).
@@ -161,12 +265,16 @@
       }
     });
     load(startSeconds);
-    const onHide = () => report({ keepalive: true });
+    const onHide = () => {
+      report({ keepalive: true });
+      sendStats();
+    };
     window.addEventListener('pagehide', onHide);
     return () => {
       cancelled = true;
       autoplay.destroy();
       window.removeEventListener('pagehide', onHide);
+      sendStats(); // also covers "next episode" swapping this player out
       teardown();
     };
   });
@@ -180,6 +288,13 @@
     controls
     playsinline
     ontimeupdate={onTimeUpdate}
+    onplaying={onPlaying}
+    onwaiting={onWaiting}
+    onseeking={() => (stats.seeking = true)}
+    onerror={() => {
+      // Native players (Safari) report decode failures here.
+      if (video?.error?.code === 3 || video?.error?.code === 4) fallbackToH264();
+    }}
     onpause={() => report()}
     onended={() => {
       report();
@@ -197,21 +312,30 @@
       <p class="font-display">{title}</p>
       {#if subtitle}<span>{subtitle}</span>{/if}
     </div>
-    {#if session && (session.audioTracks.length > 1 || session.subtitles.length)}
+    {#if session}
       <button
         class="tracks glass"
-        class:on={subIndex !== null}
         onclick={() => (menuOpen = !menuOpen)}
         aria-expanded={menuOpen}
-        aria-label="Audio and subtitles"
+        aria-label="Quality, audio and subtitles"
       >
-        <Captions size={20} />
+        <SlidersHorizontal size={20} />
       </button>
     {/if}
   </div>
 
   {#if menuOpen && session}
     <div class="menu glass" role="menu">
+      <p class="menu-title">Quality</p>
+      {#each QUALITIES as q (q.id)}
+        <button role="menuitemradio" aria-checked={q.id === quality} onclick={() => chooseQuality(q.id)}>
+          <span class="tick">{#if q.id === quality}<Check size={15} />{/if}</span>{q.label}
+          {#if q.id === 'auto' && quality === 'auto' && session.maxBitrate}
+            <span class="aside">up to {mbps(session.maxBitrate)}</span>
+          {/if}
+        </button>
+      {/each}
+      <p class="method" class:converting={session.method === 'transcode'}>{METHOD_LABEL[session.method] ?? ''}</p>
       {#if session.audioTracks.length > 1}
         <p class="menu-title">Audio</p>
         {#each session.audioTracks as a (a.index)}
@@ -310,9 +434,6 @@
     color: #fff;
     cursor: pointer;
   }
-  .tracks.on {
-    color: var(--color-accent);
-  }
   .menu {
     position: absolute;
     top: 4.2rem;
@@ -354,6 +475,22 @@
   }
   .menu button[aria-checked='true'] {
     color: var(--color-accent);
+  }
+  .aside {
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.45);
+  }
+  .method {
+    margin: 0.2rem 0.7rem 0.3rem;
+    padding: 0.45rem 0.6rem;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.6);
+    background: rgba(149, 255, 80, 0.08);
+  }
+  .method.converting {
+    background: rgba(255, 255, 255, 0.06);
   }
   .tick {
     display: grid;

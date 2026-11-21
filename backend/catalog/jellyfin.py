@@ -192,26 +192,71 @@ def public_info():
 
 # Tells Jellyfin what a browser can play: MP4/H.264 directly, everything else
 # (MKV, HEVC, DTS, 5.1, ...) transcoded to HLS H.264/AAC stereo.
-BROWSER_PROFILE = {
-    "MaxStreamingBitrate": 40_000_000,
-    "DirectPlayProfiles": [
-        {"Container": "mp4,m4v", "Type": "Video", "VideoCodec": "h264", "AudioCodec": "aac,mp3"},
-    ],
-    "TranscodingProfiles": [
-        {
-            "Container": "ts",
-            "Type": "Video",
-            "VideoCodec": "h264",
-            "AudioCodec": "aac",
-            "Context": "Streaming",
-            "Protocol": "hls",
-            "MaxAudioChannels": "2",
-            "MinSegments": 1,
-            "BreakOnNonKeyFrames": True,
-        }
-    ],
-    "SubtitleProfiles": [{"Format": "vtt", "Method": "External"}],
-}
+LAN_MAX_BITRATE = 40_000_000
+
+
+def browser_profile(caps=None, max_bitrate=LAN_MAX_BITRATE):
+    """Jellyfin device profile for one browser, built from what it says it can
+    decode (see mediahub/src/lib/playback/capabilities.js).
+
+    Video the browser can decode is *copied* into HLS (repackaging only, almost
+    no server CPU); anything else is transcoded to H.264. The server has no GPU,
+    so copying HEVC on browsers that support it is the main capacity lever.
+    """
+    caps = caps or {}
+    video = ["h264"]
+    if caps.get("hevc"):
+        video.append("hevc")
+    if caps.get("av1"):
+        video.append("av1")
+    audio = ["aac", "mp3"]
+    if caps.get("ac3"):
+        audio.append("ac3")
+    if caps.get("eac3"):
+        audio.append("eac3")
+    surround = caps.get("ac3") or caps.get("eac3")
+
+    codec_profiles = []
+    if caps.get("hevc") and not caps.get("hevc10"):
+        # Main (8-bit) only: 10-bit HEVC must still be transcoded.
+        codec_profiles.append({
+            "Type": "Video", "Codec": "hevc",
+            "Conditions": [{"Condition": "LessThanEqual", "Property": "VideoBitDepth", "Value": "8", "IsRequired": True}],
+        })
+    if caps.get("av1") and not caps.get("av1_10"):
+        codec_profiles.append({
+            "Type": "Video", "Codec": "av1",
+            "Conditions": [{"Condition": "LessThanEqual", "Property": "VideoBitDepth", "Value": "8", "IsRequired": True}],
+        })
+
+    return {
+        "MaxStreamingBitrate": max_bitrate,
+        "DirectPlayProfiles": [
+            {"Container": "mp4,m4v", "Type": "Video", "VideoCodec": ",".join(video), "AudioCodec": ",".join(audio)},
+        ],
+        "TranscodingProfiles": [
+            {
+                # HEVC/AV1 in HLS needs fMP4 segments (browsers can't play them
+                # from MPEG-TS); plain H.264 keeps the long-proven TS path.
+                "Container": "mp4" if len(video) > 1 else "ts",
+                "Type": "Video",
+                # First codec = what Jellyfin encodes to when it must transcode;
+                # every listed codec may be copied as-is.
+                "VideoCodec": ",".join(video),
+                "AudioCodec": ",".join(audio),
+                "Context": "Streaming",
+                "Protocol": "hls",
+                "MaxAudioChannels": "6" if surround else "2",
+                "MinSegments": 1,
+                "BreakOnNonKeyFrames": True,
+            }
+        ],
+        "CodecProfiles": codec_profiles,
+        "SubtitleProfiles": [{"Format": "vtt", "Method": "External"}],
+    }
+
+
+BROWSER_PROFILE = browser_profile()  # H.264-only baseline
 
 
 def authenticate(username, password, device=DEVICE_ID):
@@ -239,11 +284,12 @@ def logout(token, device=DEVICE_ID):
             raise  # Outages must be retried; only 401 proves the token is invalid.
 
 
-def playback_info(item_id, token, user_id, audio_index=None, device=DEVICE_ID):
+def playback_info(item_id, token, user_id, audio_index=None, device=DEVICE_ID, profile=None):
+    profile = profile or BROWSER_PROFILE
     body = {
         "UserId": user_id,
-        "DeviceProfile": BROWSER_PROFILE,
-        "MaxStreamingBitrate": BROWSER_PROFILE["MaxStreamingBitrate"],
+        "DeviceProfile": profile,
+        "MaxStreamingBitrate": profile["MaxStreamingBitrate"],
         "AutoOpenLiveStream": False,
     }
     if audio_index is not None:

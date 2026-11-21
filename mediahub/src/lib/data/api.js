@@ -137,8 +137,13 @@ export function setFavorite(itemId, favorite) {
  * { url, type: 'hls'|'file', startSeconds, duration, playSessionId,
  *   audioTracks[], audioIndex, subtitles[], next, segments }
  */
-export function startPlayback(itemId, startSeconds = 0, audioIndex = null) {
-  return postJSON(`/api/play/${id(itemId)}`, { startSeconds, audioIndex });
+export function startPlayback(itemId, startSeconds = 0, audioIndex = null, { caps = {}, quality = 'auto' } = {}) {
+  return postJSON(`/api/play/${id(itemId)}`, { startSeconds, audioIndex, caps, quality });
+}
+
+/** One watch's startup time / buffering / delivery method (see manage.py playbackstats). */
+export function reportPlaybackStats(itemId, stats) {
+  return postJSON(`/api/playstats/${id(itemId)}`, stats, { keepalive: true }).catch(() => {});
 }
 
 export function saveProgress(itemId, positionSeconds, durationSeconds, opts) {

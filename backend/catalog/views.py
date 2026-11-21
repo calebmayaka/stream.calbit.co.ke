@@ -20,6 +20,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from . import browse, jellyfin, streaming, throttle
 from .home import live_home, mock_home
+from .models import PlaybackStat
 from .title import build_person, build_title
 
 log = logging.getLogger(__name__)
@@ -370,7 +371,52 @@ def play(request, body, item_id):
     audio = body.get("audioIndex")
     if audio is not None and (type(audio) is not int or not 0 <= audio <= 2**31 - 1):
         return _error("audioIndex must be a non-negative integer or null", 400)
-    return JsonResponse(streaming.start(request, item_id, start, audio))
+    caps = body.get("caps") or {}
+    if not isinstance(caps, dict) or not all(k in CAPS and type(v) is bool for k, v in caps.items()):
+        return _error(f"caps must map {', '.join(CAPS)} to true/false", 400)
+    quality = body.get("quality", "auto")
+    if quality not in streaming.QUALITIES:
+        return _error(f"quality must be one of {', '.join(streaming.QUALITIES)}", 400)
+    return JsonResponse(streaming.start(request, item_id, start, audio, caps=caps, quality=quality))
+
+
+CAPS = ("hevc", "hevc10", "av1", "av1_10", "ac3", "eac3")
+PLAY_METHODS = ("direct", "remux", "transcode")
+
+
+@json_post
+@live_only
+def playback_stats(request, body, item_id):
+    """One record per watch from the player: how long until the picture
+    appeared, how often and how long it stalled, and how it was delivered.
+    Feeds `manage.py playbackstats`."""
+    ints = {"startupMs": 600_000, "stalls": 10_000, "stallMs": 86_400_000, "watchedSeconds": 86_400, "maxBitrate": 10**9}
+    for field, maximum in ints.items():
+        value = body.get(field, 0)
+        if type(value) is not int or not 0 <= value <= maximum:
+            return _error(f"{field} must be an integer between 0 and {maximum}", 400)
+    invalid = _invalid_strings(body, {"method": 16, "quality": 16, "codec": 16, "client": 64})
+    if invalid is not None:
+        return invalid
+    if body.get("method") not in PLAY_METHODS or body.get("quality", "auto") not in streaming.QUALITIES:
+        return _error("unknown method or quality", 400)
+    if body.get("watchedSeconds", 0) < 2:
+        return JsonResponse({"ok": True, "recorded": False})  # opened and closed: not a watch
+    PlaybackStat.objects.create(
+        user=request.user,
+        item_id=item_id,
+        method=body["method"],
+        codec=body.get("codec", "")[:16],
+        quality=body.get("quality", "auto"),
+        max_bitrate=body.get("maxBitrate", 0),
+        remote=streaming.media_base(request) != settings.JELLYFIN_URL,
+        startup_ms=body.get("startupMs", 0),
+        stalls=body.get("stalls", 0),
+        stall_ms=body.get("stallMs", 0),
+        watched_seconds=body.get("watchedSeconds", 0),
+        client=body.get("client", "")[:64],
+    )
+    return JsonResponse({"ok": True, "recorded": True})
 
 
 @json_post

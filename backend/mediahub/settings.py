@@ -166,6 +166,9 @@ for name in ("JELLYFIN_STREAM_TOKEN_HOURS", "JELLYFIN_TOKEN_CLEANUP_SECONDS"):
 # Base URL browsers use for media. LAN users get JELLYFIN_URL; requests that came
 # through Cloudflare (or over https) get this public hostname instead.
 JELLYFIN_PUBLIC_URL = env("JELLYFIN_PUBLIC_URL", "").rstrip("/")
+# "Auto" quality ceiling for viewers outside the LAN (bits/s). Every remote stream
+# shares the home upload (~13.5 Mbps measured 2026-11), so keep room for 2-3.
+MEDIAHUB_REMOTE_MAX_BITRATE = int(env("MEDIAHUB_REMOTE_MAX_BITRATE", "8000000"))
 
 LOGGING = {
     "version": 1,

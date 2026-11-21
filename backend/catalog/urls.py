@@ -33,6 +33,7 @@ urlpatterns = [
     path("played/<jid:item_id>", views.played),
     path("favorite/<jid:item_id>", views.favorite),
     path("play/<jid:item_id>", views.play),
+    path("playstats/<jid:item_id>", views.playback_stats),
     path("progress/<jid:item_id>", views.progress),
     path("stop", views.stop),
     path("subs/<jid:item_id>/<jid:source_id>/<int:index>", views.subtitles),
