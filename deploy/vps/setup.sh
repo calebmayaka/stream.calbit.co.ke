@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# One-shot setup for the MediaHub front-door VPS (Ubuntu 22.04/24.04).
+#
+#   curl -fsSLO https://raw.githubusercontent.com/calebmayaka/stream.calbit.co.ke/main/deploy/vps/setup.sh
+#   curl -fsSLO https://raw.githubusercontent.com/calebmayaka/stream.calbit.co.ke/main/deploy/vps/Caddyfile
+#   sudo bash setup.sh '<MEDIAHUB_PROXY_KEY from the server .env>'
+#
+# Safe to re-run. Installs Caddy + Tailscale, opens only SSH/80/443, writes the
+# Caddy config and its env file, then asks Tailscale to log in (prints a URL).
+set -euo pipefail
+
+PROXY_KEY="${1:-}"
+APP_UPSTREAM="${APP_UPSTREAM:-100.103.139.106:80}"          # IIS on 10.30.0.11 ("dev" on Tailscale)
+JELLYFIN_UPSTREAM="${JELLYFIN_UPSTREAM:-100.124.178.16:8096}" # Jellyfin ("svr-media" on Tailscale)
+HERE="$(cd "$(dirname "$0")" && pwd)"
+
+if [[ $EUID -ne 0 ]]; then echo "Run with sudo." >&2; exit 1; fi
+if [[ ${#PROXY_KEY} -lt 24 ]]; then
+  echo "Usage: sudo bash setup.sh '<MEDIAHUB_PROXY_KEY>'  (copy it from backend/.env on the server)" >&2
+  exit 1
+fi
+if [[ ! -f "$HERE/Caddyfile" ]]; then echo "Caddyfile must sit next to setup.sh." >&2; exit 1; fi
+
+echo "==> Base packages + automatic security updates"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -q
+apt-get install -yq curl gnupg ufw unattended-upgrades debian-keyring debian-archive-keyring apt-transport-https
+dpkg-reconfigure -f noninteractive unattended-upgrades
+
+echo "==> Caddy (official apt repo)"
+if ! command -v caddy >/dev/null; then
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
+  apt-get update -q
+  apt-get install -yq caddy
+fi
+
+echo "==> Tailscale (official apt repo)"
+if ! command -v tailscale >/dev/null; then
+  . /etc/os-release
+  curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${VERSION_CODENAME}.noarmor.gpg" -o /usr/share/keyrings/tailscale-archive-keyring.gpg
+  curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${VERSION_CODENAME}.tailscale-keyring.list" -o /etc/apt/sources.list.d/tailscale.list
+  apt-get update -q
+  apt-get install -yq tailscale
+fi
+
+echo "==> Firewall: SSH, HTTP, HTTPS only"
+ufw allow OpenSSH >/dev/null
+ufw allow 80/tcp >/dev/null
+ufw allow 443/tcp >/dev/null
+ufw --force enable >/dev/null
+ufw status | sed 's/^/    /'
+
+echo "==> Caddy config"
+install -d -m 0755 /var/log/caddy
+chown caddy:caddy /var/log/caddy
+install -m 0644 "$HERE/Caddyfile" /etc/caddy/Caddyfile
+umask 077
+cat > /etc/caddy/mediahub.env <<EOF
+APP_UPSTREAM=${APP_UPSTREAM}
+JELLYFIN_UPSTREAM=${JELLYFIN_UPSTREAM}
+MEDIAHUB_PROXY_KEY=${PROXY_KEY}
+EOF
+chown root:caddy /etc/caddy/mediahub.env
+chmod 0640 /etc/caddy/mediahub.env
+install -d /etc/systemd/system/caddy.service.d
+cat > /etc/systemd/system/caddy.service.d/mediahub.conf <<'EOF'
+[Service]
+EnvironmentFile=/etc/caddy/mediahub.env
+EOF
+systemctl daemon-reload
+caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile --envfile /etc/caddy/mediahub.env >/dev/null
+systemctl enable caddy >/dev/null
+systemctl restart caddy
+
+echo "==> Tailscale login"
+if tailscale status >/dev/null 2>&1; then
+  echo "    already connected as $(tailscale ip -4 | head -1)"
+else
+  echo "    Open the URL below and approve this machine (name it 'vps-front')."
+  tailscale up --hostname=vps-front
+fi
+
+echo
+echo "Done. Next: point DNS for stream.calbit.co.ke and jellyfin.calbit.co.ke at this"
+echo "server's public IP (DNS only / grey cloud). Caddy fetches HTTPS certificates"
+echo "by itself as soon as the names resolve here."
+echo "Public IP: $(curl -fsS4 https://ifconfig.me 2>/dev/null || echo '?')"

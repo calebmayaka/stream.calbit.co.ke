@@ -108,6 +108,17 @@ def _user_json(user):
 
 
 def _client_ip(request):
+    """The visitor's address, for the login lockout and logs.
+
+    Behind the VPS, Caddy sends it as X-MediaHub-Client-IP together with the
+    shared MEDIAHUB_PROXY_KEY; without a matching key that header is ignored, so
+    nobody can pick their own address. Behind the Cloudflare tunnel it arrives
+    as CF-Connecting-IP. Otherwise it's the connection address."""
+    key = settings.MEDIAHUB_PROXY_KEY
+    if key and constant_time_compare(request.headers.get("X-MediaHub-Proxy-Key", ""), key):
+        forwarded = request.headers.get("X-MediaHub-Client-IP", "").strip()
+        if forwarded:
+            return forwarded[:64]
     return request.META.get("HTTP_CF_CONNECTING_IP") or request.META.get("REMOTE_ADDR", "")
 
 

@@ -157,3 +157,33 @@ class ConcurrentThrottleTests(TransactionTestCase):
             outcomes = list(pool.map(attempt, range(20)))
         self.assertEqual(sum(outcomes), 5)
         self.assertEqual(LoginAttempt.objects.get().attempts, 5)
+
+
+@override_settings(MEDIAHUB_PROXY_KEY="proxy-secret")
+class ProxyClientIpTests(NoNetworkTestCase):
+    """Behind the VPS, lockouts must count real visitors, not the proxy."""
+
+    def setUp(self):
+        super().setUp()
+        get_user_model().objects.create_user("viewer", password="a-test-password")
+
+    def fail_from(self, ip, key="proxy-secret"):
+        headers = {"HTTP_X_MEDIAHUB_CLIENT_IP": ip}
+        if key is not None:
+            headers["HTTP_X_MEDIAHUB_PROXY_KEY"] = key
+        return self.client.post(
+            "/api/auth/login", {"username": "viewer", "password": "wrong"}, content_type="application/json", **headers
+        )
+
+    def test_lockout_is_per_visitor_behind_the_proxy(self):
+        for _ in range(5):
+            self.assertEqual(self.fail_from("203.0.113.7").status_code, 400)
+        self.assertEqual(self.fail_from("203.0.113.7").status_code, 429)
+        # Someone else on another address can still try.
+        self.assertEqual(self.fail_from("198.51.100.9").status_code, 400)
+
+    def test_client_ip_header_ignored_without_the_key(self):
+        # A visitor can't dodge the lockout by inventing addresses.
+        for i in range(5):
+            self.assertEqual(self.fail_from(f"192.0.2.{i}", key="guess").status_code, 400)
+        self.assertEqual(self.fail_from("192.0.2.99", key=None).status_code, 429)

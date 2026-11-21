@@ -1,0 +1,52 @@
+# MediaHub front door on the VPS.
+#
+#   browser ──https──▶ Caddy (this VPS, Let's Encrypt certs)
+#                        ├─ stream.calbit.co.ke   ──Tailscale──▶ IIS on 10.30.0.11 ("dev")
+#                        └─ jellyfin.calbit.co.ke ──Tailscale──▶ Jellyfin (video only)
+#
+# Values come from /etc/caddy/mediahub.env (written by setup.sh), never from git.
+# {remote_host} below is the actual connecting address; client-sent
+# X-Forwarded-For is never trusted.
+
+stream.calbit.co.ke {
+	encode zstd gzip
+
+	reverse_proxy {$APP_UPSTREAM} {
+		# IIS routes by host name, and Django's CSRF check expects the public one.
+		header_up Host stream.calbit.co.ke
+		header_up X-Forwarded-Proto https
+		# Visitor address for the login lockout, believed only with the key.
+		header_up X-MediaHub-Client-IP {remote_host}
+		header_up X-MediaHub-Proxy-Key {$MEDIAHUB_PROXY_KEY}
+		# Not coming through Cloudflare any more: don't let clients fake it.
+		header_up -CF-Connecting-IP
+	}
+
+	log {
+		output file /var/log/caddy/stream.log {
+			roll_size 20MiB
+			roll_keep 5
+		}
+	}
+}
+
+jellyfin.calbit.co.ke {
+	# Only what the MediaHub player needs (HLS playlists/segments and direct
+	# files). Jellyfin's own web UI, login and admin API stay off the internet.
+	@video path /videos/* /Videos/*
+	handle @video {
+		reverse_proxy {$JELLYFIN_UPSTREAM} {
+			flush_interval -1 # stream segments as they're transcoded
+		}
+	}
+	handle {
+		respond "Not here." 404
+	}
+
+	log {
+		output file /var/log/caddy/jellyfin.log {
+			roll_size 20MiB
+			roll_keep 5
+		}
+	}
+}
