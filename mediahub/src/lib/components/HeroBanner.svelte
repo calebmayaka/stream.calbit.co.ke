@@ -35,15 +35,28 @@
   let keyboardFocus = $state(false); // mouse clicks on dots shouldn't stop the rotation
   let hidden = $state(false);
   let reducedMotion = $state(false);
-  let loaded = $state(new Set([0, 1]));
+  // Only the current slide and the one fading out are in the page. Keeping all
+  // eight full-screen backdrops stacked (even invisible) cost a lot of memory
+  // and compositing on weaker PCs.
+  let previous = $state(-1);
 
   const item = $derived(items[index]);
   const paused = $derived(hovering || keyboardFocus || hidden || items.length < 2);
 
-  function go(i) {
-    index = (i + items.length) % items.length;
-    loaded = new Set([...loaded, index, (index + 1) % items.length]); // preload the next one
+  function preload(i) {
+    const next = items[(i + items.length) % items.length];
+    if (next?.backdrop) new Image().src = next.backdrop; // warm the browser cache, nothing drawn
   }
+
+  function go(i) {
+    previous = index;
+    index = (i + items.length) % items.length;
+    preload(index + 1);
+  }
+
+  $effect(() => {
+    preload(1);
+  });
 
   $effect(() => {
     if (paused) return;
@@ -75,14 +88,16 @@
   onfocusout={() => (keyboardFocus = false)}
 >
   {#each items as slide, i (slide.id)}
-    <img
-      class="backdrop"
-      class:active={i === index}
-      class:still={reducedMotion}
-      src={loaded.has(i) ? slide.backdrop : undefined}
-      alt=""
-      aria-hidden="true"
-    />
+    {#if i === index || i === previous}
+      <img
+        class="backdrop"
+        class:active={i === index}
+        class:still={reducedMotion}
+        src={slide.backdrop}
+        alt=""
+        aria-hidden="true"
+      />
+    {/if}
   {/each}
   <div class="scrim"></div>
 
@@ -142,21 +157,33 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    opacity: 0;
-    transform: scale(1.02);
-    transition:
-      opacity 1.2s var(--ease-condense),
-      transform 9s linear;
-  }
-  /* crossfade in + slow push-in while showing */
-  .backdrop.active {
-    opacity: 1;
+    /* The outgoing slide stays put underneath (at its end state) while the
+       new one fades in on top; then the old one is removed from the page. */
+    z-index: 0;
     transform: scale(1.08);
+  }
+  /* fade in + slow push-in while showing */
+  .backdrop.active {
+    z-index: 1;
+    animation: slide-in 9s linear both;
+  }
+  @keyframes slide-in {
+    from {
+      opacity: 0;
+      transform: scale(1.02);
+    }
+    13% {
+      opacity: 1;
+    }
+    to {
+      opacity: 1;
+      transform: scale(1.08);
+    }
   }
   .backdrop.still,
   .backdrop.still.active {
     transform: scale(1.02);
-    transition: none;
+    animation: none;
   }
 
   .dots {

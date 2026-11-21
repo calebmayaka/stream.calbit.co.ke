@@ -19,12 +19,14 @@
     background: var(--color-bg);
   }
 
+  /* No filter: blur() here. A 90px blur on half-screen blobs that also scale
+     forced a full re-blur every frame and pegged CPU/GPU on weaker PCs. The
+     radial gradients are soft on their own, and translate-only drift is a
+     cheap GPU composite. */
   .blob {
     position: absolute;
     border-radius: 50%;
-    filter: blur(90px);
     opacity: 0.5;
-    will-change: transform;
   }
 
   .blob-a {
@@ -32,27 +34,27 @@
     left: -5%;
     width: 45vw;
     height: 45vw;
-    background: radial-gradient(circle at 30% 30%, var(--color-accent), transparent 60%);
+    background: radial-gradient(circle at 30% 30%, var(--color-accent), transparent 70%);
     opacity: 0.28;
-    animation: drift-a 22s var(--ease-hover) infinite alternate;
+    animation: drift-a 40s var(--ease-hover) infinite alternate;
   }
   .blob-b {
     top: 20%;
     right: -10%;
     width: 50vw;
     height: 50vw;
-    background: radial-gradient(circle at 60% 40%, #1f7a4d, transparent 62%);
+    background: radial-gradient(circle at 60% 40%, #1f7a4d, transparent 70%);
     opacity: 0.35;
-    animation: drift-b 28s var(--ease-hover) infinite alternate;
+    animation: drift-b 48s var(--ease-hover) infinite alternate;
   }
   .blob-c {
     bottom: -20%;
     left: 25%;
     width: 55vw;
     height: 55vw;
-    background: radial-gradient(circle at 50% 50%, #0c4d2e, transparent 60%);
+    background: radial-gradient(circle at 50% 50%, #0c4d2e, transparent 70%);
     opacity: 0.45;
-    animation: drift-c 32s var(--ease-hover) infinite alternate;
+    animation: drift-c 56s var(--ease-hover) infinite alternate;
   }
 
   .vignette {
@@ -72,18 +74,22 @@
 
   @keyframes drift-a {
     to {
-      transform: translate3d(8vw, 6vh, 0) scale(1.15);
+      transform: translate3d(8vw, 6vh, 0);
     }
   }
   @keyframes drift-b {
     to {
-      transform: translate3d(-10vw, 4vh, 0) scale(1.1);
+      transform: translate3d(-10vw, 4vh, 0);
     }
   }
   @keyframes drift-c {
     to {
-      transform: translate3d(6vw, -8vh, 0) scale(1.2);
+      transform: translate3d(6vw, -8vh, 0);
     }
+  }
+
+  :global(body:has(.player)) .aurora {
+    display: none;
   }
 
   @media (prefers-reduced-motion: reduce) {

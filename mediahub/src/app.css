@@ -66,8 +66,10 @@ body {
 /* Glass surface used by header + pills */
 .glass {
   background: rgba(14, 14, 16, 0.38);
-  backdrop-filter: blur(20px) saturate(1.6);
-  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  /* Lighter than the original blur(20px) saturate(1.6): this is recomputed on
+     every scroll frame for the fixed header and tab bar. */
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 0.8px solid rgba(255, 255, 255, 0.07);
 }
 

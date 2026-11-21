@@ -117,8 +117,8 @@
     display: flex;
     flex-direction: column;
     background: rgba(4, 18, 11, 0.94);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
     animation: fade 0.2s ease;
   }
   @keyframes fade {
