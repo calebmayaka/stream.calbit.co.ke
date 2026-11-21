@@ -1,0 +1,8 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "mediahub-api", "runtimeExecutable": "backend/.venv/Scripts/python.exe", "runtimeArgs": ["backend/manage.py", "runserver", "127.0.0.1:8020"], "port": 8020 },
+    { "name": "mediahub-ui", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "mediahub", "run", "dev", "--", "--port", "5173", "--strictPort"], "port": 5173 },
+    { "name": "mediahub-preview", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "mediahub", "run", "preview", "--", "--port", "4173", "--strictPort"], "port": 4173 }
+  ]
+}

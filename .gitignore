@@ -1,0 +1,26 @@
+# --- secrets / machine state (never commit) ---
+.env
+*.env.local
+backend/var/
+*.log
+
+# --- Python ---
+backend/.venv/
+__pycache__/
+*.pyc
+
+# --- SvelteKit UI ---
+mediahub/node_modules/
+mediahub/build/
+mediahub/.svelte-kit/
+mediahub/test-results/
+mediahub/playwright-report/
+
+# --- original hand-off archive (its contents are the project itself) ---
+mediahub.zip
+
+# --- editor / OS ---
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
