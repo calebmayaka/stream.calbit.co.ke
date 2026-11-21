@@ -31,7 +31,7 @@ echo "==> Caddy"
 if ! systemctl list-unit-files caddy.service >/dev/null 2>&1 || ! systemctl cat caddy.service >/dev/null 2>&1; then
   if command -v docker >/dev/null && docker ps --format '{{.Image}} {{.Ports}}' 2>/dev/null | grep -qiE 'caddy|:443->'; then
     echo "    Caddy (or something on :443) runs in Docker here. This script only handles"
-    echo "    the system Caddy service; add deploy/vps/Caddyfile to that container's config instead."
+    echo "    the system Caddy service; use deploy/vps/install-docker-caddy.sh instead."
     exit 1
   fi
 fi

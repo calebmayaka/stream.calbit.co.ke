@@ -16,7 +16,27 @@ after:   browser → VPS (Caddy, Let's Encrypt) ──Tailscale──▶ IIS on 
 | `stream.calbit.co.ke` | VPS public IP, DNS only | `100.103.139.106:80` — IIS site `mediahub` on "dev" (.11) |
 | `jellyfin.calbit.co.ke` | VPS public IP, DNS only | `100.124.178.16:8096` — Jellyfin on "svr-media" (.12), `/videos/*` only |
 
-## Steps
+## Our VPS: Caddy runs in Docker
+
+The VPS already runs Caddy as the `caddy` container (Compose project in `/srv/proxy`,
+network `web`), importing one file per site from `/srv/proxy/sites/`. Use:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/calebmayaka/stream.calbit.co.ke/main/deploy/vps/install-docker-caddy.sh
+sudo bash install-docker-caddy.sh '<MEDIAHUB_PROXY_KEY>'
+```
+
+It checks the container can reach the app and Jellyfin over Tailscale, writes
+`stream.calbit.co.ke.caddy` and `jellyfin.calbit.co.ke.caddy` into `/srv/proxy/sites/`,
+validates, and does a graceful `caddy reload` (other sites unaffected).
+`setup.sh` below is for a VPS where Caddy is a system service.
+
+**Docker routing:** containers reach Tailscale `100.x` addresses through the host. If the
+check fails, the host's Tailscale isn't forwarding for Docker; `sudo tailscale up --reset`
+is not needed — first try `sudo docker exec caddy wget -qO- http://100.124.178.16:8096/System/Info/Public`
+to confirm, then ask before changing host networking.
+
+## Steps (system Caddy)
 
 1. **Jellyfin on Tailscale.** "svr-media" (10.30.0.12) has been offline in Tailscale
    since early October — start/sign in Tailscale on that machine again.
