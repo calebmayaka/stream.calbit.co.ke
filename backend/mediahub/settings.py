@@ -62,6 +62,9 @@ MIDDLEWARE = [
 # Session cookie login for the SPA. Accounts are managed with
 # `manage.py adduser` / `changepassword` (see README).
 SESSION_COOKIE_AGE = int(env("MEDIAHUB_SESSION_DAYS", "30")) * 24 * 3600
+# Sessions read from the (disk) cache first, written through to the database,
+# so most requests skip the session query; nothing is lost if the cache is cleared.
+SESSION_ENGINE = "django.contrib.sessions.backends.cached_db"
 SESSION_COOKIE_NAME = "mediahub_session"
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
@@ -110,6 +113,11 @@ if env("POSTGRES_DB"):
             "PASSWORD": env("POSTGRES_PASSWORD"),
             "HOST": env("POSTGRES_HOST", "127.0.0.1"),
             "PORT": env("POSTGRES_PORT", "5432"),
+            # Opening a Postgres connection costs 60-180 ms on this box; every
+            # signed-in request (each poster, too) needs the DB, so keep one open
+            # per worker thread instead of reconnecting per request.
+            "CONN_MAX_AGE": int(env("POSTGRES_CONN_MAX_AGE", "300")),
+            "CONN_HEALTH_CHECKS": True,
         }
     }
 else:

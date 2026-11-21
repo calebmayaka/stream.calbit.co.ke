@@ -238,3 +238,17 @@ class PasswordResetTests(NoNetworkTestCase):
     @override_settings(MEDIAHUB_RESET_KEY_HASH="")
     def test_disabled_without_a_key(self):
         self.assertEqual(self.reset().status_code, 404)
+
+
+class CachedSessionTests(NoNetworkTestCase):
+    """Sessions are cached (cached_db); signing out everywhere must clear the cache too."""
+
+    def test_end_sessions_signs_out_a_cached_session(self):
+        from catalog.views import end_sessions
+
+        user = get_user_model().objects.create_user("viewer", password="a-test-password")
+        other = Client()
+        other.post("/api/auth/login", {"username": "viewer", "password": "a-test-password"}, content_type="application/json")
+        self.assertEqual(other.get("/api/home").status_code, 200)  # now in the cache as well
+        self.assertEqual(end_sessions(user), 1)
+        self.assertEqual(other.get("/api/home").status_code, 401)

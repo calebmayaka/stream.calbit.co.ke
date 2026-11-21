@@ -20,7 +20,9 @@ if __name__ == "__main__":
             application,
             host=os.environ.get("MEDIAHUB_HOST", "127.0.0.1"),
             port=int(os.environ.get("MEDIAHUB_PORT", "8013")),
-            threads=int(os.environ.get("MEDIAHUB_THREADS", "8")),
+            # Requests mostly wait on Jellyfin/Postgres, not CPU; a home page fires
+            # ~100 poster requests at once, which saturated 8 threads.
+            threads=int(os.environ.get("MEDIAHUB_THREADS", "16")),
             # IIS forwards X-Forwarded-* so Django sees the real host/scheme.
             trusted_proxy="127.0.0.1",
             trusted_proxy_headers={"x-forwarded-host", "x-forwarded-proto", "x-forwarded-for"},

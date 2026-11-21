@@ -182,13 +182,21 @@ def auth_setup(request, body):
     return JsonResponse({"authenticated": True, "user": _user_json(user)})
 
 
-def _end_sessions(user):
-    """Sign a user out on every device (used after a password reset)."""
+def end_sessions(user):
+    """Sign a user out on every device (password reset, removeuser). Deletes
+    through the session engine so cached copies (cached_db) go too, not just
+    the database rows. Returns how many sessions were ended."""
+    from importlib import import_module
+
     from django.contrib.sessions.models import Session
 
+    store = import_module(settings.SESSION_ENGINE).SessionStore
+    ended = 0
     for session in Session.objects.filter(expire_date__gt=timezone.now()).iterator():
         if session.get_decoded().get("_auth_user_id") == str(user.pk):
-            session.delete()
+            store(session_key=session.session_key).delete()
+            ended += 1
+    return ended
 
 
 @json_post
@@ -228,7 +236,7 @@ def auth_reset(request, body):
     throttle.clear(site_key)
     user.set_password(password)
     user.save(update_fields=["password"])
-    _end_sessions(user)
+    end_sessions(user)
     log.warning("Password reset for %r from %s", user.username, _client_ip(request))
     login(request, user)
     return JsonResponse({"authenticated": True, "user": _user_json(user)})
