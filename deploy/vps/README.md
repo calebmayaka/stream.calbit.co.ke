@@ -1,5 +1,9 @@
 # VPS front door
 
+**Live since 2026-11-22.** Contabo VPS 161.97.79.224 (Tailscale `mayakaombogo`,
+100.87.36.46); `stream` and `jellyfin` A records point there (DNS only); Let's Encrypt
+certs via the Docker Caddy; `JELLYFIN_PUBLIC_URL=https://jellyfin.calbit.co.ke` on .11.
+
 Moves public traffic off the Cloudflare tunnel onto our own Ubuntu VPS
 (8 GB RAM, 100 GB SSD, 300 Mbps). The app itself stays on 10.30.0.11.
 
