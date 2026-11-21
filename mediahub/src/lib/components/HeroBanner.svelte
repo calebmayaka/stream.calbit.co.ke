@@ -39,29 +39,68 @@
   // eight full-screen backdrops stacked (even invisible) cost a lot of memory
   // and compositing on weaker PCs.
   let previous = $state(-1);
+  // Off-screen (scrolled down): stop rotating. Browsers skip drawing and
+  // decoding off-screen images, so slides that changed while away glitched
+  // (blank/half-faded) on the way back up.
+  let onScreen = $state(true);
+  let section = $state(null);
 
   const item = $derived(items[index]);
-  const paused = $derived(hovering || keyboardFocus || hidden || items.length < 2);
+  const paused = $derived(hovering || keyboardFocus || hidden || !onScreen || items.length < 2);
 
-  function preload(i) {
-    const next = items[(i + items.length) % items.length];
-    if (next?.backdrop) new Image().src = next.backdrop; // warm the browser cache, nothing drawn
+  /** Load *and decode* a backdrop, so it can be drawn the moment it's shown. */
+  const ready = new Map();
+  function prepare(i) {
+    const slide = items[(i + items.length) % items.length];
+    if (!slide?.backdrop) return Promise.resolve();
+    if (!ready.has(slide.backdrop)) {
+      const img = new Image();
+      img.src = slide.backdrop;
+      // decode() can reject (e.g. broken image): still allow the switch.
+      ready.set(slide.backdrop, img.decode().catch(() => {}));
+    }
+    return ready.get(slide.backdrop);
   }
 
-  function go(i) {
+  let switching = 0;
+  async function go(i) {
+    const target = (i + items.length) % items.length;
+    const ticket = ++switching;
+    // Wait (up to 4 s) until the picture is decoded, so it never fades in empty.
+    await Promise.race([prepare(target), new Promise((r) => setTimeout(r, 4000))]);
+    if (ticket !== switching) return; // a newer click/tick won
     previous = index;
-    index = (i + items.length) % items.length;
-    preload(index + 1);
+    index = target;
+    remaining = SLIDE_MS;
+    prepare(target + 1);
   }
+
+  // Time left on the current slide (plain variable: not a reactive dependency).
+  // After a pause the timer resumes where the progress dot stopped, instead of
+  // restarting the full 8 s while the dot is already half full.
+  let remaining = SLIDE_MS;
 
   $effect(() => {
-    preload(1);
+    prepare(1);
+  });
+
+  $effect(() => {
+    if (!section) return;
+    const io = new IntersectionObserver((entries) => (onScreen = entries[0].isIntersecting), { threshold: 0.15 });
+    io.observe(section);
+    return () => io.disconnect();
   });
 
   $effect(() => {
     if (paused) return;
-    const timer = setTimeout(() => go(index + 1), SLIDE_MS);
-    return () => clearTimeout(timer);
+    const slide = index;
+    const started = performance.now();
+    const timer = setTimeout(() => go(slide + 1), remaining);
+    return () => {
+      clearTimeout(timer);
+      // Paused mid-slide: keep what's left. (A slide change resets it in go().)
+      if (index === slide) remaining = Math.max(0, remaining - (performance.now() - started));
+    };
   });
 
   $effect(() => {
@@ -79,6 +118,7 @@
 </script>
 
 <section
+  bind:this={section}
   class="hero"
   aria-roledescription="carousel"
   aria-label="Featured"
