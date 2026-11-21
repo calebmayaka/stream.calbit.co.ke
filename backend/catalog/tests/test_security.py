@@ -187,3 +187,54 @@ class ProxyClientIpTests(NoNetworkTestCase):
         for i in range(5):
             self.assertEqual(self.fail_from(f"192.0.2.{i}", key="guess").status_code, 400)
         self.assertEqual(self.fail_from("192.0.2.99", key=None).status_code, 429)
+
+
+from django.contrib.auth.hashers import make_password  # noqa: E402
+
+RESET_HASH = make_password("test-reset-pass-key")
+
+
+@override_settings(MEDIAHUB_RESET_KEY_HASH=RESET_HASH)
+class PasswordResetTests(NoNetworkTestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = get_user_model().objects.create_user("watch", password="old-password-123")
+
+    def reset(self, username="watch", key="test-reset-pass-key", password="brand-new-pass-456", client=None):
+        return (client or self.client).post(
+            "/api/auth/reset", {"username": username, "key": key, "password": password}, content_type="application/json"
+        )
+
+    def test_reset_changes_password_and_signs_out_other_devices(self):
+        other = Client()
+        other.post("/api/auth/login", {"username": "watch", "password": "old-password-123"}, content_type="application/json")
+        self.assertEqual(other.get("/api/home").status_code, 200)
+
+        res = self.reset()
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(self.client.get("/api/home").status_code, 200)  # signed in here
+        self.assertEqual(other.get("/api/home").status_code, 401)  # signed out elsewhere
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("brand-new-pass-456"))
+
+    def test_wrong_key_and_unknown_account_look_the_same(self):
+        wrong_key = self.reset(key="nope")
+        no_user = self.reset(username="nobody")
+        self.assertEqual(wrong_key.status_code, 400)
+        self.assertEqual(wrong_key.json(), no_user.json())
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("old-password-123"))
+
+    def test_weak_new_password_is_refused(self):
+        self.assertEqual(self.reset(password="short").status_code, 400)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("old-password-123"))
+
+    def test_guessing_the_key_locks_out(self):
+        for _ in range(5):
+            self.assertEqual(self.reset(key="guess").status_code, 400)
+        self.assertEqual(self.reset().status_code, 429)  # even the right key, for now
+
+    @override_settings(MEDIAHUB_RESET_KEY_HASH="")
+    def test_disabled_without_a_key(self):
+        self.assertEqual(self.reset().status_code, 404)

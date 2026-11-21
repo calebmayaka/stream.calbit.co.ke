@@ -77,6 +77,9 @@ CSRF_TRUSTED_ORIGINS = env_list(
 # One-time code that lets the first account be created from the login page
 # while no accounts exist (see views.auth_setup). Empty = setup disabled.
 MEDIAHUB_SETUP_CODE = env("MEDIAHUB_SETUP_CODE", "")
+# Hash (never the key itself) of the pass key for the "Forgot password?" page.
+# Set/rotate with `manage.py setresetkey`; empty = reset page disabled.
+MEDIAHUB_RESET_KEY_HASH = env("MEDIAHUB_RESET_KEY_HASH", "")
 # Shared secret the VPS reverse proxy (Caddy) sends with X-MediaHub-Client-IP.
 # Only with it is that header believed, so the login lockout counts real visitor
 # addresses instead of the proxy's. Empty = header ignored. (deploy/vps/)

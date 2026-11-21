@@ -7,6 +7,8 @@ from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model, login, logout, password_validation
+from django.contrib.auth.hashers import check_password
+from django.utils import timezone
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -175,6 +177,58 @@ def auth_setup(request, body):
             return _error("Setup is closed. Sign in instead.", 403)
         user.save()
     log.info("First account %r created via setup from %s", username, _client_ip(request))
+    login(request, user)
+    return JsonResponse({"authenticated": True, "user": _user_json(user)})
+
+
+def _end_sessions(user):
+    """Sign a user out on every device (used after a password reset)."""
+    from django.contrib.sessions.models import Session
+
+    for session in Session.objects.filter(expire_date__gt=timezone.now()).iterator():
+        if session.get_decoded().get("_auth_user_id") == str(user.pk):
+            session.delete()
+
+
+@json_post
+def auth_reset(request, body):
+    """Set a new password with the server's reset pass key ("Forgot password?").
+
+    The key is stored only as a hash (MEDIAHUB_RESET_KEY_HASH, see
+    `manage.py setresetkey`). Attempts are limited per address and site-wide, and
+    the reply never says whether the account exists. A reset signs that account
+    out everywhere, then signs it in here."""
+    invalid = _invalid_strings(body, {"username": 150, "key": 256, "password": 1024})
+    if invalid is not None:
+        return invalid
+    if not settings.MEDIAHUB_RESET_KEY_HASH:
+        return _error("Password reset isn't enabled on this server.", 404)
+
+    ip_key, site_key = f"reset-fail:{_client_ip(request)}", "reset-fail:site"
+    if not throttle.reserve(ip_key) or not throttle.reserve(site_key):
+        return _error("Too many attempts. Try again in 15 minutes.", 429)
+
+    username = body.get("username", "").strip()
+    supplied = body.get("key", "")
+    password = body.get("password", "")
+    User = get_user_model()
+    user = User.objects.filter(username=username, is_active=True).first()
+    key_ok = check_password(supplied, settings.MEDIAHUB_RESET_KEY_HASH)
+    if not key_ok or user is None:
+        log.warning("Failed password reset for %r from %s", username, _client_ip(request))
+        return _error("Wrong account name or pass key.", 400)
+
+    try:
+        password_validation.validate_password(password, user)
+    except ValidationError as exc:
+        return _error(" ".join(exc.messages), 400)
+
+    throttle.clear(ip_key)
+    throttle.clear(site_key)
+    user.set_password(password)
+    user.save(update_fields=["password"])
+    _end_sessions(user)
+    log.warning("Password reset for %r from %s", user.username, _client_ip(request))
     login(request, user)
     return JsonResponse({"authenticated": True, "user": _user_json(user)})
 

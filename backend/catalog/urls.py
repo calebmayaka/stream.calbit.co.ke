@@ -22,6 +22,7 @@ urlpatterns = [
     path("auth/login", views.auth_login),
     path("auth/logout", views.auth_logout),
     path("auth/setup", views.auth_setup),
+    path("auth/reset", views.auth_reset),
     path("health", views.health),
     path("home", views.home),
     path("browse", views.browse_view),

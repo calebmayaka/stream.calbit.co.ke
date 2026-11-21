@@ -59,6 +59,11 @@ export function setupFirstAccount({ code, username, name, password }) {
   return postJSON('/api/auth/setup', { code, username, name, password });
 }
 
+/** "Forgot password?": account name + the server's reset pass key + new password. Signs in on success. */
+export function resetPassword({ username, key, password }) {
+  return postJSON('/api/auth/reset', { username, key, password });
+}
+
 export function signOut() {
   return postJSON('/api/auth/logout', {});
 }

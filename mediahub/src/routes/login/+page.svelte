@@ -101,7 +101,9 @@
       {:else}<LogIn size={18} /> {setup ? 'Create account & sign in' : 'Sign in'}{/if}
     </button>
 
-    {#if !setup}<p class="foot">Need an account? Ask Caleb.</p>{/if}
+    {#if !setup}
+      <p class="foot"><a href="/reset">Forgot password?</a> · Need an account? Ask Caleb.</p>
+    {/if}
   </form>
 </div>
 
@@ -210,6 +212,13 @@
     to {
       transform: rotate(360deg);
     }
+  }
+  .foot a {
+    color: var(--color-accent);
+    text-decoration: none;
+  }
+  .foot a:hover {
+    text-decoration: underline;
   }
   .foot {
     text-align: center;

@@ -10,14 +10,15 @@ function safeNext(value) {
   return value && value.startsWith('/') && !value.startsWith('//') && !value.startsWith('/login') ? value : '/';
 }
 
-// Login gate: every page needs a session except /login. (The API enforces the
-// same thing server-side; this just sends people to the form instead of
-// showing them errors.)
+// Login gate: every page needs a session except /login and /reset ("Forgot
+// password?"). The API enforces the same thing server-side; this just sends
+// people to the form instead of showing them errors.
 export async function load({ url }) {
   const me = await getMe();
   const onLogin = url.pathname === '/login';
+  const isPublic = onLogin || url.pathname === '/reset';
 
-  if (!me.authenticated && !onLogin) {
+  if (!me.authenticated && !isPublic) {
     redirect(307, `/login?next=${encodeURIComponent(url.pathname + url.search)}`);
   }
   if (me.authenticated && onLogin) {
