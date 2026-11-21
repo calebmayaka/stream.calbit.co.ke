@@ -1,5 +1,8 @@
 # MediaHub front door on the VPS.
 #
+#   Installed as /etc/caddy/sites/mediahub.caddy and imported from the main
+#   Caddyfile, so other sites on this VPS keep their own config.
+#
 #   browser ──https──▶ Caddy (this VPS, Let's Encrypt certs)
 #                        ├─ stream.calbit.co.ke   ──Tailscale──▶ IIS on 10.30.0.11 ("dev")
 #                        └─ jellyfin.calbit.co.ke ──Tailscale──▶ Jellyfin (video only)

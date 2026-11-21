@@ -46,6 +46,11 @@ proxied) and set `JELLYFIN_PUBLIC_URL=https://media.calebmayaka.com`. The tunnel
 
 ## Notes
 
+- Caddy on the VPS also serves another service. MediaHub lives in
+  `/etc/caddy/sites/mediahub.caddy`; the main `/etc/caddy/Caddyfile` only gets one
+  `import sites/*.caddy` line (setup.sh keeps a copy as `Caddyfile.before-mediahub`).
+  The first version of setup.sh overwrote the main Caddyfile — fixed.
+
 - `MEDIAHUB_PROXY_KEY` (in `backend/.env` and `/etc/caddy/mediahub.env`) lets Django trust
   the visitor IP Caddy forwards, so login lockouts are per visitor. Without it, every
   visitor would share the proxy's address.

@@ -51,10 +51,25 @@ ufw allow 443/tcp >/dev/null
 ufw --force enable >/dev/null
 ufw status | sed 's/^/    /'
 
-echo "==> Caddy config"
+echo "==> Caddy config (MediaHub in its own file; other sites untouched)"
 install -d -m 0755 /var/log/caddy
 chown caddy:caddy /var/log/caddy
-install -m 0644 "$HERE/Caddyfile" /etc/caddy/Caddyfile
+# Caddy on this VPS may already serve other sites from /etc/caddy/Caddyfile.
+# Never replace that file: back it up once, keep MediaHub in mediahub.caddy and
+# add a single import line.
+install -d -m 0755 /etc/caddy/sites
+install -m 0644 "$HERE/Caddyfile" /etc/caddy/sites/mediahub.caddy
+if [[ -f /etc/caddy/Caddyfile ]]; then
+  cp -n /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.before-mediahub" 2>/dev/null || true
+  if grep -q '^# MediaHub front door' /etc/caddy/Caddyfile; then
+    echo "    !! /etc/caddy/Caddyfile is the MediaHub file from an older version of this"
+    echo "    !! script, which replaced it. Restore your own Caddyfile first, then re-run."
+    exit 1
+  fi
+fi
+if ! grep -qs '^import sites/\*\.caddy' /etc/caddy/Caddyfile; then
+  printf '\n# MediaHub (stream.calbit.co.ke / jellyfin.calbit.co.ke)\nimport sites/*.caddy\n' >> /etc/caddy/Caddyfile
+fi
 umask 077
 cat > /etc/caddy/mediahub.env <<EOF
 APP_UPSTREAM=${APP_UPSTREAM}
@@ -71,6 +86,8 @@ EOF
 systemctl daemon-reload
 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile --envfile /etc/caddy/mediahub.env >/dev/null
 systemctl enable caddy >/dev/null
+# Restart (not reload) so the new EnvironmentFile is picked up; other sites
+# blip for a second.
 systemctl restart caddy
 
 echo "==> Tailscale login"
