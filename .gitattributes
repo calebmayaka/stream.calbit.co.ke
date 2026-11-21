@@ -1,0 +1,7 @@
+# Keep line endings exactly as written (LF) on every machine, regardless of
+# core.autocrlf, so files don't show as "changed" when nothing was edited.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.zip binary
