@@ -62,6 +62,25 @@ before changing any host networking.
 5. **Server .11**: `JELLYFIN_PUBLIC_URL=https://jellyfin.calbit.co.ke` in `backend/.env`,
    then `nssm restart mediahub-api`.
 
+## TCP tuning (BBR) — applied 2026-11-22
+
+The links home ↔ VPS (Europe, ~170-275 ms) are long, so the VPS uses BBR instead of
+cubic. Through-the-VPS tests before → after: HEVC (repackaged) picture after a seek
+17.5 s → 7.3 s and 1.8x → 3.5x real time; H.264 transcode 12.5 s → 7.5 s.
+
+- Host: `tcp_bbr` loaded at boot (`/etc/modules-load.d/bbr.conf`), and
+  `/etc/sysctl.d/99-bbr.conf` sets `net.core.default_qdisc=fq` and
+  `net.ipv4.tcp_congestion_control=bbr`.
+- The Caddy container has its own network namespace, so `/srv/proxy/compose.yml`
+  sets it too (under the `caddy` service):
+  ```yaml
+      sysctls:
+        net.ipv4.tcp_congestion_control: bbr
+  ```
+  Check: `sudo docker exec caddy cat /proc/sys/net/ipv4/tcp_congestion_control` → `bbr`.
+- Undo: delete both, `sudo sysctl -w net.ipv4.tcp_congestion_control=cubic`,
+  `cd /srv/proxy && sudo docker compose up -d caddy`.
+
 ## Rollback
 
 Point `stream` back at the tunnel (CNAME `a75c8e81-bbec-4e6d-90b8-8916e8c33a7c.cfargotunnel.com`,
