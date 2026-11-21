@@ -31,10 +31,10 @@ It checks the container can reach the app and Jellyfin over Tailscale, writes
 validates, and does a graceful `caddy reload` (other sites unaffected).
 `setup.sh` below is for a VPS where Caddy is a system service.
 
-**Docker routing:** containers reach Tailscale `100.x` addresses through the host. If the
-check fails, the host's Tailscale isn't forwarding for Docker; `sudo tailscale up --reset`
-is not needed — first try `sudo docker exec caddy wget -qO- http://100.124.178.16:8096/System/Info/Public`
-to confirm, then ask before changing host networking.
+**Docker routing:** containers reach Tailscale `100.x` addresses through the host. The
+script tests this first and writes nothing if it fails; in that case check with
+`sudo docker exec caddy wget -qO- http://100.124.178.16:8096/System/Info/Public`
+before changing any host networking.
 
 ## Steps (system Caddy)
 
