@@ -27,8 +27,16 @@ apt-get update -q
 apt-get install -yq curl gnupg ufw unattended-upgrades debian-keyring debian-archive-keyring apt-transport-https
 dpkg-reconfigure -f noninteractive unattended-upgrades
 
-echo "==> Caddy (official apt repo)"
+echo "==> Caddy"
+if ! systemctl list-unit-files caddy.service >/dev/null 2>&1 || ! systemctl cat caddy.service >/dev/null 2>&1; then
+  if command -v docker >/dev/null && docker ps --format '{{.Image}} {{.Ports}}' 2>/dev/null | grep -qiE 'caddy|:443->'; then
+    echo "    Caddy (or something on :443) runs in Docker here. This script only handles"
+    echo "    the system Caddy service; add deploy/vps/Caddyfile to that container's config instead."
+    exit 1
+  fi
+fi
 if ! command -v caddy >/dev/null; then
+  echo "    installing from the official apt repo"
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
   apt-get update -q
@@ -44,12 +52,17 @@ if ! command -v tailscale >/dev/null; then
   apt-get install -yq tailscale
 fi
 
-echo "==> Firewall: SSH, HTTP, HTTPS only"
-ufw allow OpenSSH >/dev/null
-ufw allow 80/tcp >/dev/null
-ufw allow 443/tcp >/dev/null
-ufw --force enable >/dev/null
-ufw status | sed 's/^/    /'
+echo "==> Firewall"
+# Other services share this VPS: only add rules, never switch a firewall on
+# (that could cut off ports they use).
+if ufw status | grep -q '^Status: active'; then
+  ufw allow OpenSSH >/dev/null
+  ufw allow 80/tcp >/dev/null
+  ufw allow 443/tcp >/dev/null
+  echo "    ufw active: made sure 22, 80, 443 are allowed"
+else
+  echo "    ufw is off; left as is (80 and 443 must be reachable from the internet)"
+fi
 
 echo "==> Caddy config (MediaHub in its own file; other sites untouched)"
 install -d -m 0755 /var/log/caddy
