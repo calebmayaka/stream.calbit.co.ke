@@ -190,6 +190,9 @@
     max-height: 760px;
     width: 100%;
     overflow: hidden;
+    /* Keep the slides' z-index inside the banner, so they can't paint over
+       the rows below (the "Continue Watching" heading rides up over it). */
+    isolation: isolate;
   }
   .backdrop {
     position: absolute;
@@ -228,6 +231,7 @@
 
   .dots {
     position: absolute;
+    z-index: 3;
     right: 1.5rem;
     bottom: 8%;
     display: flex;
@@ -274,8 +278,10 @@
       transform: scaleX(1);
     }
   }
+  /* Layers: slide images 0-1, fade 2, text and dots 3. */
   .scrim {
     position: absolute;
+    z-index: 2;
     inset: 0;
     background:
       linear-gradient(to top, var(--color-bg) 2%, transparent 55%),
@@ -284,6 +290,7 @@
 
   .content {
     position: absolute;
+    z-index: 3;
     left: 0;
     bottom: 8%;
     max-width: 640px;
