@@ -1,22 +1,21 @@
 <script>
-  import { page } from '$app/state';
-  import { getPerson } from '$lib/data/api.js';
   import MediaCard from '$lib/components/MediaCard.svelte';
 
   let data = $state(null);
   let error = $state(null);
   let expanded = $state(false);
 
-  const id = $derived(page.params.id);
+  // From +page.js; the fetch starts on hover/touch, before the click.
+  let { data: route } = $props();
 
   $effect(() => {
-    const personId = id;
+    const personId = route.id;
     data = null;
     error = null;
     expanded = false;
-    getPerson(personId)
-      .then((d) => personId === id && (data = d))
-      .catch((e) => (error = e.message));
+    route.person
+      .then((d) => personId === route.id && (data = d))
+      .catch((e) => personId === route.id && (error = e.message));
   });
 
   function age(born) {

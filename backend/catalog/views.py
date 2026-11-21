@@ -555,5 +555,7 @@ def image(request, item_id, image_type):
 
     body, content_type = cached
     res = HttpResponse(body, content_type=content_type)
-    res["Cache-Control"] = "public, max-age=86400"
+    # Each poster costs a ~0.4 s round trip through the VPS; let browsers keep
+    # them a week. Private: they sit behind the login.
+    res["Cache-Control"] = "private, max-age=604800"
     return res

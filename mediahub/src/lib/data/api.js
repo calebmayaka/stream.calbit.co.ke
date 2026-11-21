@@ -44,27 +44,39 @@ async function postJSON(path, body, { keepalive = false } = {}) {
 // --- Account -----------------------------------------------------------------
 
 /** @returns {Promise<{ authenticated: boolean, setup?: boolean, user?: { username: string, name: string } }>} */
-export async function getMe() {
+// Signed-in state is checked once per visit, not on every click (each check is
+// a ~0.4 s round trip through the VPS). Anything that changes it forgets the
+// cached answer; an expired session is caught by the API's 401 (toLogin).
+let me = null;
+
+export async function getMe({ fresh = false } = {}) {
+  if (me && !fresh) return me;
   const res = await fetch('/api/auth/me', { headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(`Couldn’t reach MediaHub (${res.status})`);
-  return res.json();
+  const data = await res.json();
+  me = data.authenticated ? data : null; // only remember signed-in answers
+  return data;
 }
 
 export function signIn(username, password) {
+  me = null;
   return postJSON('/api/auth/login', { username, password });
 }
 
 /** First-run only (no accounts yet): create the first login with the server's setup code. */
 export function setupFirstAccount({ code, username, name, password }) {
+  me = null;
   return postJSON('/api/auth/setup', { code, username, name, password });
 }
 
 /** "Forgot password?": account name + the server's reset pass key + new password. Signs in on success. */
 export function resetPassword({ username, key, password }) {
+  me = null;
   return postJSON('/api/auth/reset', { username, key, password });
 }
 
 export function signOut() {
+  me = null;
   return postJSON('/api/auth/logout', {});
 }
 

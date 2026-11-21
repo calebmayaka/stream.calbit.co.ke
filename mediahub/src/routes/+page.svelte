@@ -1,9 +1,10 @@
 <script>
-  import { getHome } from '$lib/data/api.js';
   import HeroBanner from '$lib/components/HeroBanner.svelte';
   import MediaRow from '$lib/components/MediaRow.svelte';
 
-  const home = getHome();
+  // From +page.js; the fetch starts when "Home" is hovered/touched.
+  let { data: route } = $props();
+  const home = $derived(route.home);
 </script>
 
 <svelte:head>

@@ -20,23 +20,35 @@
   const season = $derived(data?.seasons.find((s) => s.id === seasonId) ?? data?.seasons[0]);
   const canMarkWatched = $derived(data && (data.playable || data.kind === 'series'));
 
-  async function load(itemId) {
+  // Route data from +page.js: the fetch starts on hover/touch (preloading),
+  // so the page is often ready by the time the link is clicked.
+  let { data: route } = $props();
+
+  async function show(itemId, pending) {
     try {
-      const fresh = await getTitle(itemId);
+      const fresh = await pending;
       if (itemId !== id) return; // navigated away meanwhile
       data = fresh;
       error = null;
       if (!fresh.seasons.some((s) => s.id === seasonId)) seasonId = fresh.seasons[0]?.id ?? null;
     } catch (e) {
-      error = e.message;
+      if (itemId === id) error = e.message;
     }
   }
 
+  /** Re-fetch (after playing or marking watched). */
+  function load(itemId) {
+    return show(itemId, getTitle(itemId));
+  }
+
   $effect(() => {
+    const itemId = route.id;
+    const pending = route.title;
     data = null;
     playing = null;
     trailerOpen = false;
-    load(id);
+    error = null;
+    show(itemId, pending);
   });
 
   // ?play=1 (hero "Play" button) starts playback as soon as details arrive.
