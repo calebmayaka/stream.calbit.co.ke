@@ -48,12 +48,7 @@ for f in stream.calbit.co.ke.caddy jellyfin.calbit.co.ke.caddy; do
 done
 
 umask 077   # the stream file holds the proxy key
-cat > "$SITES/stream.calbit.co.ke.caddy" <<EOF
-# MediaHub app -> IIS on 10.30.0.11 over Tailscale. Managed by
-# deploy/vps/install-docker-caddy.sh (github.com/calebmayaka/stream.calbit.co.ke).
-stream.calbit.co.ke {
-	encode zstd gzip
-	reverse_proxy $APP {
+PROXY_BLOCK="reverse_proxy $APP {
 		# IIS routes by host name; Django's CSRF check expects the public one.
 		header_up Host stream.calbit.co.ke
 		header_up X-Forwarded-Proto https
@@ -61,9 +56,46 @@ stream.calbit.co.ke {
 		header_up X-MediaHub-Client-IP {remote_host}
 		header_up X-MediaHub-Proxy-Key $KEY
 		header_up -CF-Connecting-IP
+	}"
+
+if [[ -f /srv/apps/mediahub/current/index.html ]]; then
+  echo "    app files found in /srv/apps/mediahub/current: serving them from the VPS"
+  cat > "$SITES/stream.calbit.co.ke.caddy" <<EOF
+# MediaHub. App files are served here on the VPS (deployed by
+# mediahub/scripts/deploy-vps.ps1); only /api goes home to Django over
+# Tailscale. Managed by deploy/vps/install-docker-caddy.sh.
+stream.calbit.co.ke {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
+	handle /api/* {
+		$PROXY_BLOCK
+	}
+
+	handle {
+		root * /srv/apps/mediahub/current
+		# Content-hashed build output never changes; everything else revalidates
+		# so a new deploy shows up immediately.
+		@immutable path /_app/immutable/*
+		header @immutable Cache-Control "public, max-age=31536000, immutable"
+		header ?Cache-Control "no-cache"
+		# SPA: unknown paths (/title/..., /movies) get the app shell.
+		try_files {path} /index.html
+		file_server
 	}
 }
 EOF
+else
+  echo "    no app files on the VPS yet: proxying everything home (run deploy-vps.ps1, then re-run this)"
+  cat > "$SITES/stream.calbit.co.ke.caddy" <<EOF
+# MediaHub app -> IIS on 10.30.0.11 over Tailscale. Managed by
+# deploy/vps/install-docker-caddy.sh (github.com/calebmayaka/stream.calbit.co.ke).
+stream.calbit.co.ke {
+	encode zstd gzip
+	$PROXY_BLOCK
+}
+EOF
+fi
 
 umask 022
 cat > "$SITES/jellyfin.calbit.co.ke.caddy" <<EOF
